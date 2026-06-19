@@ -1,0 +1,32 @@
+{
+  "por_tipo_de_ticket": {
+    "Technical Issue": "Soporte Técnico",
+    "Billing Inquiry": "Facturación",
+    "Refund Request": "Facturación",
+    "Cancellation Request": "Retención",
+    "Product Inquiry": "Producto"
+  },
+  "equipos": {
+    "Soporte Técnico": {
+      "descripcion": "Bugs, errores de software, problemas de instalación, fallos de hardware, problemas de red",
+      "horario": "24/7 para Critical y High, horario de oficina para Medium y Low"
+    },
+    "Facturación": {
+      "descripcion": "Cargos incorrectos, facturas, solicitudes de reembolso, métodos de pago, descuentos",
+      "horario": "Lunes a viernes 9:00-17:00"
+    },
+    "Retención": {
+      "descripcion": "Solicitudes de cancelación, downgrades, clientes en riesgo de churn, negociación de planes",
+      "horario": "Lunes a viernes 9:00-18:00"
+    },
+    "Producto": {
+      "descripcion": "Consultas sobre funcionalidades, roadmap, guías de uso, onboarding de nuevos clientes",
+      "horario": "Lunes a viernes 9:00-18:00"
+    }
+  },
+  "reglas_especiales": {
+    "reembolsos": "Reembolsos mayores a $500 requieren aprobación de un supervisor de Facturación",
+    "cancelaciones": "El equipo de Retención debe intentar retener al cliente antes de procesar la cancelación",
+    "escalacion_legal": "Tickets que mencionen términos legales, demandas o regulaciones deben escalarse a Legal"
+  }
+}

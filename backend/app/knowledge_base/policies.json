@@ -1,0 +1,39 @@
+{
+  "slas": {
+    "Critical": {
+      "primera_respuesta": "1 hora",
+      "resolucion": "4 horas",
+      "descripcion": "Problemas que impiden completamente el uso del producto o generan pérdida económica directa"
+    },
+    "High": {
+      "primera_respuesta": "4 horas",
+      "resolucion": "24 horas",
+      "descripcion": "Funcionalidades importantes afectadas, existe workaround disponible"
+    },
+    "Medium": {
+      "primera_respuesta": "8 horas",
+      "resolucion": "48 horas",
+      "descripcion": "Problemas que no bloquean el uso principal del producto"
+    },
+    "Low": {
+      "primera_respuesta": "24 horas",
+      "resolucion": "5 días hábiles",
+      "descripcion": "Consultas generales, solicitudes de información, mejoras menores"
+    }
+  },
+  "escalation": {
+    "regla": "Tickets Critical sin primera respuesta en 30 minutos deben escalarse al líder de turno",
+    "segunda_escalacion": "Si un ticket Critical no se resuelve en 2 horas, escalar a gerencia de soporte"
+  },
+  "satisfaccion": {
+    "escala": "1 (muy insatisfecho) a 5 (muy satisfecho)",
+    "objetivo_mensual": "Promedio mayor o igual a 4.0",
+    "nota": "La calificación solo se recopila cuando el ticket está en estado Closed"
+  },
+  "canales": {
+    "Social media": "Respuesta máxima en 2 horas independientemente de la prioridad, por visibilidad pública",
+    "Chat": "Respuesta inmediata esperada durante horario de oficina (9:00-18:00)",
+    "Email": "Aplican SLAs estándar según prioridad",
+    "Phone": "Aplican SLAs estándar según prioridad"
+  }
+}
