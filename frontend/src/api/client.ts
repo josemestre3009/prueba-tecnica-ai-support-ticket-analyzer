@@ -23,3 +23,6 @@ export const triggerIngest = () =>
 
 export const triggerProcess = () =>
   api.post("/process").then((r) => r.data);
+
+export const triggerReprocess = () =>
+  api.post("/reprocess").then((r) => r.data);

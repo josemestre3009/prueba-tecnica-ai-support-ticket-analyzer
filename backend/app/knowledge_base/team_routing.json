@@ -1,11 +1,15 @@
 {
-  "por_tipo_de_ticket": {
-    "Technical Issue": "Soporte Técnico",
-    "Billing Inquiry": "Facturación",
-    "Refund Request": "Facturación",
-    "Cancellation Request": "Retención",
+  "criterio_de_enrutamiento": "El equipo se asigna según la CATEGORÍA IA (problema real detectado en la descripción), no según el tipo declarado por el cliente. El tipo declarado puede estar incorrecto — la IA analiza el contenido y determina el equipo correcto.",
+  "por_categoria_ia": {
+    "Hardware": "Soporte Técnico",
+    "Software": "Soporte Técnico",
+    "Network": "Soporte Técnico",
+    "Other": "Soporte Técnico",
+    "Billing": "Facturación",
+    "Cancellation": "Retención",
     "Product Inquiry": "Producto"
   },
+  "ejemplo_de_discrepancia_esperada": "Un ticket con tipo 'Billing Inquiry' cuya descripción habla de un fallo de hardware será categorizado como 'Hardware' y enrutado a Soporte Técnico. Esto es CORRECTO por diseño.",
   "equipos": {
     "Soporte Técnico": {
       "descripcion": "Bugs, errores de software, problemas de instalación, fallos de hardware, problemas de red",

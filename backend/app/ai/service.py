@@ -3,6 +3,7 @@ import json
 import os
 import threading
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
@@ -16,6 +17,7 @@ else:
     from .mock_client import ask_question as _ask
 
 _processing = False
+_processing_lock = threading.Lock()
 
 
 def launch_batch() -> None:
@@ -42,9 +44,10 @@ def _batch_in_new_loop() -> None:
 async def _batch_async() -> None:
     """Lógica async del batch. El semáforo limita 3 llamadas IA concurrentes."""
     global _processing
-    if _processing:
-        return
-    _processing = True
+    with _processing_lock:
+        if _processing:
+            return
+        _processing = True
 
     semaphore = asyncio.Semaphore(3)
 
@@ -53,7 +56,8 @@ async def _batch_async() -> None:
         tasks = [_process_single(tid, semaphore) for tid in ticket_ids]
         await asyncio.gather(*tasks, return_exceptions=True)
     finally:
-        _processing = False
+        with _processing_lock:
+            _processing = False
 
 
 # Alias para compatibilidad con routers existentes
@@ -148,10 +152,13 @@ def _write_error(ticket_db_id: int, error_msg: str) -> None:
         db.close()
 
 
+_TRANSIENT_ERRORS = (TimeoutError, ConnectionError, OSError)
+
+
 @retry(
     wait=wait_exponential(multiplier=1, min=2, max=30),
     stop=stop_after_attempt(3),
-    retry=retry_if_exception_type(Exception),
+    retry=retry_if_exception_type(_TRANSIENT_ERRORS),
     reraise=True,
 )
 async def _call_ai_with_retry(ticket_data: dict) -> dict:
@@ -194,7 +201,6 @@ async def answer_question(question: str) -> str:
         )
         by_priority = (
             db.query(Ticket.ticket_priority, sqlfunc.count())
-            .filter(Ticket.ticket_priority != None)
             .group_by(Ticket.ticket_priority)
             .all()
         )
@@ -245,6 +251,87 @@ async def answer_question(question: str) -> str:
             .group_by(Ticket.ticket_type).all()
         )
         avg_age = db.query(sqlfunc.avg(Ticket.customer_age)).filter(Ticket.customer_age != None).scalar()
+
+        # Enrutamiento real: ticket_type × equipo (para preguntas de validación)
+        routing_real = (
+            db.query(Ticket.ticket_type, Ticket.ai_responsible_team, sqlfunc.count().label("cnt"))
+            .filter(Ticket.ticket_type != None, Ticket.ai_responsible_team != None)
+            .group_by(Ticket.ticket_type, Ticket.ai_responsible_team)
+            .order_by(Ticket.ticket_type, sqlfunc.count().desc())
+            .all()
+        )
+
+        # Enrutamiento real: categoría IA × equipo (confirma que el routing por contenido es correcto)
+        routing_por_categoria = (
+            db.query(Ticket.ai_category, Ticket.ai_responsible_team, sqlfunc.count().label("cnt"))
+            .filter(Ticket.ai_category != None, Ticket.ai_responsible_team != None)
+            .group_by(Ticket.ai_category, Ticket.ai_responsible_team)
+            .order_by(Ticket.ai_category, sqlfunc.count().desc())
+            .all()
+        )
+
+        # Cobertura de campos opcionales
+        sin_edad = db.query(Ticket).filter(Ticket.customer_age.is_(None)).count()
+        sin_email = db.query(Ticket).filter(Ticket.customer_email.is_(None)).count()
+        sin_rating = db.query(Ticket).filter(Ticket.satisfaction_rating.is_(None)).count()
+        sin_genero = db.query(Ticket).filter(Ticket.customer_gender.is_(None)).count()
+
+        # Estado × prioridad (para preguntas de tickets críticos abiertos)
+        estado_por_prioridad = (
+            db.query(Ticket.ticket_status, Ticket.ticket_priority, sqlfunc.count().label("cnt"))
+            .filter(Ticket.ticket_status != None, Ticket.ticket_priority != None)
+            .group_by(Ticket.ticket_status, Ticket.ticket_priority)
+            .order_by(Ticket.ticket_priority, Ticket.ticket_status)
+            .all()
+        )
+
+        # Sentimiento × canal (evita que la IA invente sentimientos no válidos)
+        sentiment_por_canal = (
+            db.query(Ticket.ticket_channel, Ticket.ai_sentiment, sqlfunc.count().label("cnt"))
+            .filter(Ticket.ticket_channel != None, Ticket.ai_sentiment != None)
+            .group_by(Ticket.ticket_channel, Ticket.ai_sentiment)
+            .order_by(Ticket.ticket_channel, sqlfunc.count().desc())
+            .all()
+        )
+
+        # Sentimiento × estado (tickets frustrados abiertos, etc.)
+        sentiment_por_estado = (
+            db.query(Ticket.ai_sentiment, Ticket.ticket_status, sqlfunc.count().label("cnt"))
+            .filter(Ticket.ai_sentiment != None, Ticket.ticket_status != None)
+            .group_by(Ticket.ai_sentiment, Ticket.ticket_status)
+            .order_by(Ticket.ai_sentiment, sqlfunc.count().desc())
+            .all()
+        )
+
+        # Distribución de ratings por valor (1-5)
+        rating_distribution = (
+            db.query(Ticket.satisfaction_rating, sqlfunc.count().label("cnt"))
+            .filter(Ticket.satisfaction_rating != None)
+            .group_by(Ticket.satisfaction_rating)
+            .order_by(Ticket.satisfaction_rating)
+            .all()
+        )
+
+        # Rating promedio por producto (solo productos con al menos 3 ratings)
+        rating_por_producto = (
+            db.query(Ticket.product_purchased, sqlfunc.avg(Ticket.satisfaction_rating).label("avg_r"), sqlfunc.count().label("cnt"))
+            .filter(Ticket.product_purchased != None, Ticket.satisfaction_rating != None)
+            .group_by(Ticket.product_purchased)
+            .having(sqlfunc.count() >= 3)
+            .order_by(sqlfunc.avg(Ticket.satisfaction_rating))
+            .limit(10)
+            .all()
+        )
+
+        # Tickets más recientes por first_response_time (último soporte atendido)
+        ultimos_tickets = (
+            db.query(Ticket)
+            .filter(Ticket.first_response_time != None)
+            .order_by(Ticket.first_response_time.desc())
+            .limit(5)
+            .all()
+        )
+
         # Compras por mes (para preguntas sobre fechas)
         purchases_by_month = (
             db.query(
@@ -257,7 +344,13 @@ async def answer_question(question: str) -> str:
             .all()
         )
 
-        aggregate_context = f"""### Estadísticas agregadas del dataset ({total} tickets totales, {processed} analizados por IA):
+        ahora_colombia = datetime.now(ZoneInfo("America/Bogota"))
+        fecha_actual = ahora_colombia.strftime("%A %d de %B de %Y, %H:%M (hora Colombia)")
+
+        aggregate_context = f"""### Fecha y hora actual (Colombia): {fecha_actual}
+Nota: el dataset contiene tickets del período 2020-2023. Preguntas sobre "hoy" o "esta semana" se refieren a esa ventana de datos, no a la fecha actual.
+
+### Estadísticas agregadas del dataset ({total} tickets totales, {processed} analizados por IA):
 
 **Top productos por volumen de tickets:**
 {chr(10).join(f"  - {p}: {c} tickets" for p, c in top_products)}
@@ -265,8 +358,11 @@ async def answer_question(question: str) -> str:
 **Top productos con tickets Critical/High:**
 {chr(10).join(f"  - {p}: {c} tickets críticos/altos" for p, c in top_critical_products)}
 
-**Distribución por prioridad:**
-{chr(10).join(f"  - {p}: {c}" for p, c in by_priority)}
+**Distribución por prioridad (incluye None para tickets sin prioridad asignada):**
+{chr(10).join(f"  - {p if p else 'Sin prioridad'}: {c}" for p, c in by_priority)}
+
+**Distribución de ratings de satisfacción (1-5, solo tickets con rating):**
+{chr(10).join(f"  - Rating {int(r)}: {c} tickets" for r, c in rating_distribution)}
 
 **Distribución por categoría (IA):**
 {chr(10).join(f"  - {c}: {n}" for c, n in by_category)}
@@ -277,6 +373,30 @@ async def answer_question(question: str) -> str:
 **Rating promedio de satisfacción:** {round(avg_rating, 2) if avg_rating else 'N/A'} / 5
 **Edad promedio de clientes:** {round(avg_age, 1) if avg_age else 'N/A'} años
 **Tickets Critical/High sin resolver:** {critical_open}
+
+**Cobertura de campos (datos faltantes en el dataset completo):**
+  - Sin edad registrada: {sin_edad} de {total} tickets
+  - Sin email registrado: {sin_email} de {total} tickets
+  - Sin rating registrado: {sin_rating} de {total} tickets
+  - Sin género registrado: {sin_genero} de {total} tickets
+
+**Enrutamiento real por tipo de ticket (dataset completo):**
+{chr(10).join(f"  - {tt} → {eq}: {c}" for tt, eq, c in routing_real)}
+
+**Enrutamiento real por categoría IA (confirma routing por contenido):**
+{chr(10).join(f"  - {cat} → {eq}: {c}" for cat, eq, c in routing_por_categoria)}
+
+**Estado × prioridad (tickets abiertos/pendientes por nivel de urgencia):**
+{chr(10).join(f"  - {st} | {pr}: {c}" for st, pr, c in estado_por_prioridad)}
+
+**Sentimiento por canal (sentimientos válidos: Neutral, Frustrated, Urgent, Satisfied, Confused):**
+{chr(10).join(f"  - {ch} | {s}: {c}" for ch, s, c in sentiment_por_canal)}
+
+**Sentimiento por estado del ticket:**
+{chr(10).join(f"  - {s} | {st}: {c}" for s, st, c in sentiment_por_estado)}
+
+**Rating promedio por producto (productos con ≥3 ratings, orden ascendente = peor primero):**
+{chr(10).join(f"  - {p}: {round(r,2)}/5 ({c} ratings)" for p, r, c in rating_por_producto)}
 
 **Distribución por género:**
 {chr(10).join(f"  - {g}: {c}" for g, c in by_gender)}
@@ -289,10 +409,13 @@ async def answer_question(question: str) -> str:
 
 **Compras por mes (YYYY-MM: cantidad):**
 {chr(10).join(f"  - {m}: {c} compras" for m, c in purchases_by_month)}
+
+**Últimos 5 tickets atendidos (por fecha de primera respuesta):**
+{chr(10).join(f"  - [ID {t.ticket_id}] {t.first_response_time} | {t.product_purchased} | {t.ticket_status} | {t.ticket_priority} | {t.ai_category or 'sin categoría'}" for t in ultimos_tickets)}
 """
 
         words = [w.lower() for w in question.split() if len(w) > 2]
-        all_tickets = db.query(Ticket).limit(400).all()
+        all_tickets = db.query(Ticket).order_by(Ticket.ticket_id).limit(400).all()
 
         # Buscar IDs de tickets mencionados explícitamente en la pregunta
         import re as _re
@@ -346,4 +469,32 @@ async def answer_question(question: str) -> str:
     finally:
         db.close()
 
-    return await _ask(question, knowledge_base, full_context)
+    from .safe_sql import SCHEMA, extract_sql_tags, format_results, run_safe_query
+
+    # Primer intento: responder desde el contexto precalculado
+    response = await _ask(question, knowledge_base, full_context, SCHEMA)
+
+    # Si el LLM no tenía los datos emite uno o varios <sql>...</sql>
+    sqls = extract_sql_tags(response)
+    if sqls:
+        parts: list[str] = []
+        for i, sql in enumerate(sqls, 1):
+            try:
+                rows = run_safe_query(sql, settings.database_url)
+                parts.append(
+                    f"Consulta {i}:\n```sql\n{sql}\n```\n"
+                    f"Resultado ({len(rows)} filas):\n{format_results(rows)}"
+                )
+            except ValueError as exc:
+                parts.append(f"Consulta {i}: rechazada por seguridad — {exc}")
+            except Exception as exc:
+                parts.append(f"Consulta {i}: error al ejecutar — {exc}")
+
+        followup = (
+            "Datos obtenidos de la base de datos:\n\n"
+            + "\n\n".join(parts)
+            + f"\n\nResponde la pregunta de forma concisa usando estos datos. No menciones consultas SQL ni mecanismos internos.\nPregunta: {question}"
+        )
+        response = await _ask(followup, knowledge_base, "", "")
+
+    return response

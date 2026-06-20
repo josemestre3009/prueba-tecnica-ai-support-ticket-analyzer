@@ -108,10 +108,11 @@ async def analyze_ticket(ticket_data: dict) -> dict:
     return json.loads(raw)
 
 
-async def ask_question(question: str, knowledge_base: str, tickets_context: str) -> str:
+async def ask_question(question: str, knowledge_base: str, tickets_context: str, schema: str = "") -> str:
     prompt = ASK_PROMPT.format(
         knowledge_base=knowledge_base,
         tickets_context=tickets_context,
         question=question,
+        schema=schema,
     )
-    return await _complete([{"role": "user", "content": prompt}], max_tokens=800, temperature=0.3)
+    return await _complete([{"role": "user", "content": prompt}], max_tokens=2000, temperature=0.3)

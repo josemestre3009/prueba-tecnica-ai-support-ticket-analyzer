@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     ai_mode: str = "mock"
     ai_model: str = "mock"
-    database_url: str = "sqlite:///./tickets.db"
+    database_url: str = "sqlite:///./data/tickets.db"
     dataset_path: str = "./dataset/tickets.csv"
     auto_ingest_on_start: bool = True
 

@@ -4,11 +4,129 @@ from typing import Optional
 
 from dateutil import parser as dateparser
 
-VALID_PRIORITIES = {"Low", "Medium", "High", "Critical"}
 VALID_STATUSES = {"Open", "Pending Customer Response", "Closed"}
 VALID_CHANNELS = {"Email", "Phone", "Chat", "Social media"}
 VALID_GENDERS = {"Male", "Female", "Other"}
 TEMPLATE_REGEX = re.compile(r"\{[^}]+\}")
+
+# Títulos y sufijos a eliminar de nombres
+_NAME_TITLES = re.compile(
+    r"^(Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.)\s*|"
+    r"\s*(MD|PhD|Jr\.|Sr\.|II|III|IV)$",
+    re.IGNORECASE,
+)
+
+
+def _fix_mojibake(text: str) -> str:
+    """Corrige texto Latin-1 leído erróneamente como UTF-8 (ej: 'Ã¡' → 'á')."""
+    try:
+        return text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
+def _normalize_name(value: str) -> Optional[str]:
+    if not value:
+        return None
+    name = _fix_mojibake(value.strip())
+    name = _NAME_TITLES.sub("", name).strip()
+    if not name:
+        return None
+    # Si está todo en mayúsculas, convertir a Title Case
+    if name == name.upper():
+        name = name.title()
+    return name or None
+
+
+_PRODUCT_ALIASES = {
+    "playstation": "Sony PlayStation",
+    "xbox": "Microsoft Xbox Controller",
+    "iphone": "Apple iPhone",
+    "macbook": "Apple MacBook Pro",
+    "macbook pro": "Apple MacBook Pro",
+    "nikon d": "Nikon D",
+    "canon eos": "Canon EOS",
+    "gopro": "GoPro Hero",
+}
+
+
+def _normalize_product(value: str) -> Optional[str]:
+    if not value:
+        return None
+    product = _fix_mojibake(value.strip())
+    # Si está todo en mayúsculas, convertir a Title Case
+    if product == product.upper():
+        product = product.title()
+    # Resolver aliases de productos conocidos
+    key = product.lower().strip()
+    if key in _PRODUCT_ALIASES:
+        return _PRODUCT_ALIASES[key]
+    return product or None
+
+
+def _normalize_priority(value: str) -> Optional[str]:
+    v = value.strip().lower()
+    mapping = {
+        # Valores canónicos (insensible a mayúsculas)
+        "critical": "Critical",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low",
+        # Variantes en inglés
+        "urgent": "Critical",
+        "med": "Medium",
+        # Variantes en español
+        "crítica": "Critical",
+        "critica": "Critical",
+        "alta": "High",
+        "media": "Medium",
+        "baja": "Low",
+        # Códigos P1-P4
+        "p1": "Critical",
+        "p2": "High",
+        "p3": "Medium",
+        "p4": "Low",
+        # Números 1-4
+        "1": "Critical",
+        "2": "High",
+        "3": "Medium",
+        "4": "Low",
+    }
+    return mapping.get(v)
+
+
+def _normalize_ticket_type(value: str) -> Optional[str]:
+    v = value.strip().lower().replace("_", " ").replace("-", " ")
+    if not v:
+        return None
+    # Normalizar a los 5 tipos canónicos
+    if "billing" in v:
+        return "Billing Inquiry"
+    if "refund" in v:
+        return "Refund Request"
+    if "cancel" in v:
+        return "Cancellation Request"
+    if "product" in v and ("inquiry" in v or "question" in v or "info" in v):
+        return "Product Inquiry"
+    if "product" in v:
+        return "Product Inquiry"
+    if "technical" in v or "tech" in v:
+        return "Technical Issue"
+    # Intento por title-case exacto después del mapeo fallido
+    titled = value.strip().title()
+    canonical = {
+        "Technical Issue", "Billing Inquiry", "Refund Request",
+        "Cancellation Request", "Product Inquiry",
+    }
+    return titled if titled in canonical else titled or None
+
+
+def _normalize_status(value: str) -> Optional[str]:
+    cleaned = value.strip()
+    if "pending" in cleaned.lower():
+        return "Pending Customer Response"
+    titled = cleaned.title()
+    return titled if titled in VALID_STATUSES else None
 
 
 def _parse_date(value: str) -> Optional[date]:
@@ -29,20 +147,6 @@ def _parse_datetime(value: str):
         return None
 
 
-def _normalize_priority(value: str) -> Optional[str]:
-    cleaned = value.strip().title()
-    return cleaned if cleaned in VALID_PRIORITIES else None
-
-
-def _normalize_status(value: str) -> Optional[str]:
-    cleaned = value.strip()
-    # Variantes de "Pending Customer Response"
-    if "pending" in cleaned.lower():
-        return "Pending Customer Response"
-    titled = cleaned.title()
-    return titled if titled in VALID_STATUSES else None
-
-
 def clean_ticket(raw: dict) -> dict:
     ticket: dict = {}
 
@@ -52,11 +156,15 @@ def clean_ticket(raw: dict) -> dict:
     except (ValueError, TypeError):
         ticket["ticket_id"] = 0
 
-    # Campos de texto libre
-    ticket["customer_name"] = (raw.get("Customer Name") or "").strip() or None
+    # Nombre — normalización de casing, títulos y encoding
+    ticket["customer_name"] = _normalize_name(raw.get("Customer Name") or "")
+
+    # Asunto y descripción — solo limpieza de espacios
     ticket["ticket_subject"] = (raw.get("Ticket Subject") or "").strip() or None
     ticket["ticket_description"] = (raw.get("Ticket Description") or "").strip() or None
-    ticket["product_purchased"] = (raw.get("Product Purchased") or "").strip() or None
+
+    # Producto — normalización de casing y encoding
+    ticket["product_purchased"] = _normalize_product(raw.get("Product Purchased") or "")
 
     # Email → minúsculas y validación básica
     email = (raw.get("Customer Email") or "").strip().lower()
@@ -76,18 +184,18 @@ def clean_ticket(raw: dict) -> dict:
     # Fecha de compra
     ticket["date_of_purchase"] = _parse_date(raw.get("Date of Purchase", ""))
 
-    # Tipo de ticket → strip + title
-    ticket_type = (raw.get("Ticket Type") or "").strip().title()
-    ticket["ticket_type"] = ticket_type or None
+    # Tipo de ticket — normalización a 5 valores canónicos
+    ticket["ticket_type"] = _normalize_ticket_type(raw.get("Ticket Type") or "")
 
-    # Prioridad y estado normalizados
+    # Prioridad — normalización de múltiples formatos (P1-P4, baja, urgent…)
     ticket["ticket_priority"] = _normalize_priority(raw.get("Ticket Priority") or "")
+
+    # Estado
     ticket["ticket_status"] = _normalize_status(raw.get("Ticket Status") or "")
 
     # Canal
     channel_raw = (raw.get("Ticket Channel") or "").strip()
     channel = channel_raw.title()
-    # "Social media" se rompe con title() → "Social Media"
     if "social" in channel.lower():
         channel = "Social media"
     ticket["ticket_channel"] = channel if channel in VALID_CHANNELS else channel_raw or None
