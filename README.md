@@ -380,7 +380,8 @@ Este proyecto fue desarrollado usando **Claude Code** (claude-opus-4-8, Anthropi
 ### Herramientas usadas
 
 - **Claude Code** — asistente de terminal integrado en el editor (VSCode). Acceso a todos los archivos del proyecto, ejecución de comandos bash, lectura de logs y salida de Docker.
-- **Gemini** — usado para verificar el plan técnico propuesto y obtener un segundo punto de vista sobre las decisiones de arquitectura, lo que permitió refinar el enfoque antes de implementar.
+- **Gemini 3 pro y ChatGpt 5.5** — usados para verificar el plan técnico propuesto por Claude Code y obtener un segundo punto de vista sobre las decisiones de arquitectura, lo que permitió refinar el enfoque antes de implementar.
+- **autoskills** (`npx autoskills`, by [mindudev](https://github.com/mindudev)) — usado para extender las capacidades de Claude Code con skills adicionales durante el desarrollo.
 
 ### Para qué lo usé
 
@@ -395,7 +396,7 @@ Los archivos iniciales del proyecto fueron generados con Claude: modelos SQLAlch
 - Diseñó el sistema de **contexto agregado** para `/ask` (pre-calcular estadísticas SQL en lugar de pasar tickets individuales), y el **fallback Text-to-SQL** con validación de seguridad.
 
 **Normalización de datos:**
-Identificó todos los casos edge del CSV (24 variantes de Ticket Type, prioridades en español, mojibake, timestamps negativos) y reescribió `cleaner.py` para cubrirlos.
+Identificó los casos edge del CSV (24 variantes de Ticket Type, prioridades en español, mojibake, timestamps negativos) y reescribió `cleaner.py` para cubrirlos.
 
 ### Qué validé manualmente
 
