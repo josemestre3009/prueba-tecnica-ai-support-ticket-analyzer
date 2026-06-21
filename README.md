@@ -32,7 +32,7 @@ Analizador de tickets de soporte con IA. Ingesta tickets desde un CSV, los enriq
 
 ```bash
 # 1. Clonar el repositorio
-git clone <repo-url>
+git clone https://github.com/josemestre3009/prueba-tecnica-ai-support-ticket-analyzer
 cd ai-support-ticket-analyzer
 
 # 2. Configurar variables de entorno
@@ -375,11 +375,12 @@ Ubicada en `backend/app/knowledge_base/`. Se inyecta completa en el prompt de `/
 
 ## Uso de IA durante el desarrollo
 
-Este proyecto fue desarrollado usando **Claude Code** (claude-sonnet-4-6, Anthropic) como asistente principal durante toda la sesión de trabajo.
+Este proyecto fue desarrollado usando **Claude Code** (claude-opus-4-8, Anthropic) como asistente principal durante toda la sesión de trabajo.
 
 ### Herramientas usadas
 
 - **Claude Code** — asistente de terminal integrado en el editor (VSCode). Acceso a todos los archivos del proyecto, ejecución de comandos bash, lectura de logs y salida de Docker.
+- **Gemini** — usado para verificar el plan técnico propuesto y obtener un segundo punto de vista sobre las decisiones de arquitectura, lo que permitió refinar el enfoque antes de implementar.
 
 ### Para qué lo usé
 
@@ -395,18 +396,6 @@ Los archivos iniciales del proyecto fueron generados con Claude: modelos SQLAlch
 
 **Normalización de datos:**
 Identificó todos los casos edge del CSV (24 variantes de Ticket Type, prioridades en español, mojibake, timestamps negativos) y reescribió `cleaner.py` para cubrirlos.
-
-**Debugging:**
-- Detectó que había **dos archivos de BD** simultáneos (`/app/tickets.db` y `/app/data/tickets.db`) causando que la IA respondiera con datos incorrectos al verificar.
-- Identificó que `max_tokens=800` en `/ask` causaba respuestas cortadas.
-- Diagnosticó que tenacity reintentaba errores de JSON (no transitorios), causando lentitud innecesaria.
-- Encontró que 68 registros tenían `time_to_resolution < first_response_time` por error del CSV generado sintéticamente.
-
-**Validación continua:**
-Después de cada cambio, Claude ejecutó queries directas contra la BD real para verificar que las respuestas del bot coincidieran con los datos reales (routing 400/400 correcto, distribución de prioridades, totales por equipo, timestamps corregidos).
-
-**Refinamiento de prompts:**
-Iteró el prompt de análisis de tickets hasta lograr categorización correcta con routing por contenido, y el prompt de `/ask` para que sea conciso, no invente datos y use el fallback SQL cuando corresponde.
 
 ### Qué validé manualmente
 
