@@ -113,10 +113,33 @@ def _read_ticket(ticket_db_id: int) -> dict | None:
         db.close()
 
 
+_VALID_SENTIMENTS = {"Neutral", "Frustrated", "Urgent", "Satisfied", "Confused"}
+_VALID_CATEGORIES = {"Hardware", "Software", "Network", "Billing", "Cancellation", "Product Inquiry", "Other"}
+_VALID_PRIORITIES = {"Critical", "High", "Medium", "Low"}
+
+def _sanitize_result(result: dict) -> dict:
+    """Normaliza valores inválidos que el LLM pueda devolver fuera de los rangos definidos."""
+    sentiment = result.get("sentiment", "Neutral")
+    if sentiment not in _VALID_SENTIMENTS:
+        result["sentiment"] = "Neutral"
+
+    category = result.get("category", "Other")
+    if category not in _VALID_CATEGORIES:
+        result["category"] = "Other"
+
+    priority = result.get("priority", "Medium")
+    if priority not in _VALID_PRIORITIES:
+        result["priority"] = "Medium"
+
+    return result
+
+
 def _write_result(ticket_db_id: int, result: dict) -> None:
     """Síncrono — corre en thread pool."""
     from ..database import SessionLocal
     from ..models import Ticket
+
+    result = _sanitize_result(result)
 
     db = SessionLocal()
     try:
@@ -252,6 +275,20 @@ async def answer_question(question: str) -> str:
         )
         avg_age = db.query(sqlfunc.avg(Ticket.customer_age)).filter(Ticket.customer_age != None).scalar()
 
+        # Tiempo promedio de resolución (solo registros válidos: resolution > first_response)
+        from sqlalchemy import text as sqlt
+        avg_resolution_hours = db.execute(sqlt(
+            "SELECT ROUND(AVG((julianday(time_to_resolution) - julianday(first_response_time)) * 24), 2) "
+            "FROM tickets "
+            "WHERE time_to_resolution IS NOT NULL AND first_response_time IS NOT NULL "
+            "AND julianday(time_to_resolution) > julianday(first_response_time)"
+        )).scalar()
+        invalid_timestamps = db.execute(sqlt(
+            "SELECT COUNT(*) FROM tickets "
+            "WHERE time_to_resolution IS NOT NULL AND first_response_time IS NOT NULL "
+            "AND julianday(time_to_resolution) < julianday(first_response_time)"
+        )).scalar()
+
         # Enrutamiento real: ticket_type × equipo (para preguntas de validación)
         routing_real = (
             db.query(Ticket.ticket_type, Ticket.ai_responsible_team, sqlfunc.count().label("cnt"))
@@ -350,6 +387,14 @@ async def answer_question(question: str) -> str:
         aggregate_context = f"""### Fecha y hora actual (Colombia): {fecha_actual}
 Nota: el dataset contiene tickets del período 2020-2023. Preguntas sobre "hoy" o "esta semana" se refieren a esa ventana de datos, no a la fecha actual.
 
+### LIMITACIÓN CRÍTICA DE DATOS — leer antes de responder:
+El dataset NO tiene campo de fecha/hora de creación del ticket.
+- `first_response_time` = cuándo se envió la primera respuesta (NO cuándo llegó el ticket)
+- `time_to_resolution` = cuándo se cerró el ticket
+- `date_of_purchase` = fecha de compra del producto (NO relacionada con el soporte)
+POR LO TANTO: es IMPOSIBLE calcular "tiempo de primera respuesta" ni "velocidad de respuesta por canal".
+Si te preguntan por velocidad o tiempo de respuesta por canal, indica esta limitación. NO uses `date_of_purchase` para calcular tiempos de soporte.
+
 ### Estadísticas agregadas del dataset ({total} tickets totales, {processed} analizados por IA):
 
 **Top productos por volumen de tickets:**
@@ -373,6 +418,8 @@ Nota: el dataset contiene tickets del período 2020-2023. Preguntas sobre "hoy" 
 **Rating promedio de satisfacción:** {round(avg_rating, 2) if avg_rating else 'N/A'} / 5
 **Edad promedio de clientes:** {round(avg_age, 1) if avg_age else 'N/A'} años
 **Tickets Critical/High sin resolver:** {critical_open}
+**Tiempo promedio de resolución:** {avg_resolution_hours} horas (calculado sobre registros válidos únicamente)
+**Registros con timestamps inválidos (resolution < first_response):** {invalid_timestamps} — son errores del CSV original, ignorar en cálculos de tiempo
 
 **Cobertura de campos (datos faltantes en el dataset completo):**
   - Sin edad registrada: {sin_edad} de {total} tickets

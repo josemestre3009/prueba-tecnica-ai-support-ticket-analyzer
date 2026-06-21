@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from dateutil import parser as dateparser
@@ -200,9 +200,14 @@ def clean_ticket(raw: dict) -> dict:
         channel = "Social media"
     ticket["ticket_channel"] = channel if channel in VALID_CHANNELS else channel_raw or None
 
-    # Timestamps
-    ticket["first_response_time"] = _parse_datetime(raw.get("First Response Time", ""))
-    ticket["time_to_resolution"] = _parse_datetime(raw.get("Time to Resolution", ""))
+    # Timestamps — corrige casos donde resolution < first_response (error del CSV)
+    # sumando 1 día a time_to_resolution (el ticket se resolvió al día siguiente)
+    first_response = _parse_datetime(raw.get("First Response Time", ""))
+    time_to_resolution = _parse_datetime(raw.get("Time to Resolution", ""))
+    if first_response and time_to_resolution and time_to_resolution < first_response:
+        time_to_resolution = time_to_resolution + timedelta(days=1)
+    ticket["first_response_time"] = first_response
+    ticket["time_to_resolution"] = time_to_resolution
 
     # Rating de satisfacción — solo válido 1-5
     try:
